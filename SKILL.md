@@ -1,15 +1,15 @@
 ---
 name: skill-to-github
-description: "Sync a WorkBuddy user-level skill directory to a GitHub repository using git over SSH. Use when the user asks to publish, update, back up, version-control, or reconcile a local skill with a GitHub repo. The user must explicitly name both the local skill and the GitHub project; if the repo does not exist, guide the user to create it on the GitHub website. Runs a leak/privacy audit before every upload and reports any concern to the user for a decision. Ensures README.md exists and is current (AI-generated on request), relies on git's built-in integrity checks rather than re-downloading files, and self-updates when it hits a problem it does not yet cover."
+description: "Sync a WorkBuddy user-level skill directory to a GitHub repository using git over SSH. Use when the user asks to publish, update, back up, version-control, or reconcile a local skill with a GitHub repo. The user must explicitly name both the local skill and the GitHub project; if the repo does not exist, guide the user to create it on the GitHub website. Runs a leak/privacy audit before every upload and reports any concern to the user for a decision. Ensures README.md exists and is current — generating it when missing, or updating it from the old README plus the new skill's changes when the repo README's version is older than the skill's, always on user approval. Relies on git's built-in integrity checks rather than re-downloading files, and self-updates when it hits a problem it does not yet cover."
 agent_created: true
-version: 2.1.0
+version: 2.2.0
 ---
 
 # skill-to-github
 
 ## Overview
 
-Mirror a WorkBuddy user-level skill folder (typically `C:\Users\USER\.workbuddy\skills\<skill-name>\`) to a GitHub repository. The skill enforces explicit targeting (which local skill, which GitHub project), ensures the target repo exists (guiding the user to create it on the website when it is missing), audits for leaks/privacy issues before every upload and reports any concern to the user for a decision, keeps `README.md` current, verifies with git's own integrity mechanisms, and records any newly discovered fixes into itself.
+Mirror a WorkBuddy user-level skill folder (typically `C:\Users\USER\.workbuddy\skills\<skill-name>\`) to a GitHub repository. The skill enforces explicit targeting (which local skill, which GitHub project), ensures the target repo exists (guiding the user to create it on the website when it is missing), audits for leaks/privacy issues before every upload and reports any concern to the user for a decision, keeps `README.md` current — generating it when missing, or updating it from the old README plus the new skill's changes when the repo README's version is older than the skill's, always on user approval — verifies with git's own integrity mechanisms, and records any newly discovered fixes into itself.
 
 ## When to Use
 
@@ -48,11 +48,15 @@ git ls-remote git@github.com:<owner>/<repo>.git
 
 ## Step 2 — Ensure README.md exists and is current
 
-Before each upload/update, check `README.md` (in the local skill; note what the repo currently has after cloning):
+Before each upload/update, check `README.md`. The repo's current README is available in the clone after Step 1; the local skill may or may not have one. Compare versions when the skill declares one.
 
-1. **Missing** (no `README.md` in the local skill) → ask the user whether to auto-generate it.
-2. **Present but possibly stale** → judge whether it still reflects the current skill: if the skill has a `version:`, the README should reference it; spot-check that the described requirements and features match the current `SKILL.md`. When in doubt, treat it as not-current.
-3. If missing or not-current, **ask the user**: "README.md 缺失/可能已过期，是否调用大模型总结该技能的要求与功能，自动生成 / 更新？"
+1. **Local skill has no `README.md`** → ask the user whether to auto-generate it.
+2. **Version comparison (when the skill has `version:` in `SKILL.md`)** → read the repo's README (from the clone) and the version it states (typically a `当前版本` / `Version:` line); compare with the local skill's `version:`:
+   - **Repo README version < local skill version** → ask the user: "远程 README 的版本（vX）比技能版本（vY）旧，是否调用大模型，按照旧版 README 与新版技能的变化来更新 README？"
+     - On approval: read the repo's **old README** and the local **new `SKILL.md`** (plus supporting files); have the model update the README by applying what changed between the two skill versions — keep the old README's structure and tone where still valid, refresh the version number, features, and workflow to match the new skill. Write the result into the **local skill directory** so it becomes part of the skill and is uploaded, then continue.
+     - If the user declines: keep the repo's old README as-is (do not overwrite it) and proceed.
+3. **Present but no version signal, or otherwise possibly stale** → spot-check that the described requirements and features match the current `SKILL.md`; when in doubt, treat it as not-current.
+4. If missing or not-current, **ask the user**: "README.md 缺失/可能已过期，是否调用大模型总结该技能的要求与功能，自动生成 / 更新？"
    - On approval, read the full `SKILL.md` (and supporting files) and have the model summarize the skill's purpose, requirements, features, workflow, and usage into a clear `README.md`. Write it into the **local skill directory** so it becomes part of the skill, then continue.
    - If the user declines, leave the README as-is and proceed.
 
@@ -116,7 +120,7 @@ If this run hits a problem that the skill (this file or `references/setup.md`) d
 - **Explicit targets first.** Never sync without the user naming the exact local skill and `owner/repo`; verify the local `SKILL.md` name before overlaying.
 - **`core.autocrlf=false` is mandatory.** Without it, Git for Windows rewrites line endings and corrupts Python scripts.
 - **Creating a repo is done on the GitHub website**, not with the SSH key: send the user to https://github.com/new with the exact name/owner/visibility, then confirm via `git ls-remote` and clone.
-- **README is checked before every push**, and only auto-generated after the user agrees.
+- **README is checked before every push**: generate if missing; when the repo README's version is older than the local skill's, ask the user before letting the model update it based on the old README + the new skill's changes. Never auto-write without the user's decision.
 - **Verify via git (`status`/`diff`/`fsck`) and the push result**, not by re-downloading.
 - **Audit before every upload/update**: file inventory, secret patterns, absolute personal paths, no nested `.git`. Any concern → stop, report to the user, wait for a decision.
 - **Preserve repo-only files:** always `cp -r src/. dst/`, never `cp -r src dst`.
@@ -128,7 +132,7 @@ If this run hits a problem that the skill (this file or `references/setup.md`) d
 - [ ] User explicitly named the local skill (path verified, `SKILL.md` name confirmed) and the exact `owner/repo`.
 - [ ] Target repo exists (cloned), or was created by the user on https://github.com/new and confirmed via `git ls-remote`, then cloned.
 - [ ] **Leak/privacy audit passed** (file inventory clean, no real secrets, absolute paths are only illustrative examples, no nested `.git`); any concern was reported to the user and resolved by their decision.
-- [ ] README.md exists and is current — or the user was asked and an AI-generated README was added on approval.
+- [ ] README.md exists and is current: generated if missing (on user approval), or updated from the old README + new skill changes when the repo README's version is older than the skill's (on user approval).
 - [ ] `git status`/`git diff` show only the expected changed files; `git fsck --full` reports no errors.
 - [ ] `git push` exits 0 and advances `main`; optionally `git ls-remote` confirms the remote hash.
 - [ ] Any newly encountered, previously undocumented problem was solved and recorded into the skill (version bumped if behavior changed).
