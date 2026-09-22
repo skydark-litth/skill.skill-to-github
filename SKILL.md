@@ -1,15 +1,15 @@
 ---
 name: skill-to-github
-description: "Sync a WorkBuddy user-level skill directory to a GitHub repository using git over SSH. Use when the user asks to publish, update, back up, version-control, or reconcile a local skill with a GitHub repo. The user must explicitly name both the local skill and the GitHub project; if the repo does not exist, guide the user to create it on the GitHub website. Ensures README.md exists and is current (AI-generated on request), relies on git's built-in integrity checks rather than re-downloading files, and self-updates when it hits a problem it does not yet cover."
+description: "Sync a WorkBuddy user-level skill directory to a GitHub repository using git over SSH. Use when the user asks to publish, update, back up, version-control, or reconcile a local skill with a GitHub repo. The user must explicitly name both the local skill and the GitHub project; if the repo does not exist, guide the user to create it on the GitHub website. Runs a leak/privacy audit before every upload and reports any concern to the user for a decision. Ensures README.md exists and is current (AI-generated on request), relies on git's built-in integrity checks rather than re-downloading files, and self-updates when it hits a problem it does not yet cover."
 agent_created: true
-version: 2.0.0
+version: 2.1.0
 ---
 
 # skill-to-github
 
 ## Overview
 
-Mirror a WorkBuddy user-level skill folder (typically `C:\Users\USER\.workbuddy\skills\<skill-name>\`) to a GitHub repository. The skill enforces explicit targeting (which local skill, which GitHub project), ensures the target repo exists (guiding the user to create it on the website when it is missing), keeps `README.md` current, verifies with git's own integrity mechanisms, and records any newly discovered fixes into itself.
+Mirror a WorkBuddy user-level skill folder (typically `C:\Users\USER\.workbuddy\skills\<skill-name>\`) to a GitHub repository. The skill enforces explicit targeting (which local skill, which GitHub project), ensures the target repo exists (guiding the user to create it on the website when it is missing), audits for leaks/privacy issues before every upload and reports any concern to the user for a decision, keeps `README.md` current, verifies with git's own integrity mechanisms, and records any newly discovered fixes into itself.
 
 ## When to Use
 
@@ -56,7 +56,18 @@ Before each upload/update, check `README.md` (in the local skill; note what the 
    - On approval, read the full `SKILL.md` (and supporting files) and have the model summarize the skill's purpose, requirements, features, workflow, and usage into a clear `README.md`. Write it into the **local skill directory** so it becomes part of the skill, then continue.
    - If the user declines, leave the README as-is and proceed.
 
-## Step 3 — Overlay the local skill into the clone
+## Step 3 — Check for leaks or privacy issues (before every upload/update)
+
+Run a **leak / privacy audit** on the local skill before overlaying anything. Check at minimum:
+
+1. **File inventory.** List all files in the skill. Confirm nothing unintended is present: no key files (e.g. `id_ed25519`, `*.pem`), no credential/config files, no personal archives or logs. If anything unintended appears, stop and report to the user.
+2. **Secret patterns.** Scan file contents for credential markers — `BEGIN (RSA|OPENSSH|EC|PRIVATE) KEY`, `ghp_`/`gho_` (GitHub tokens), cloud keys, `password=`/`api_key=`/`Bearer` — and confirm any hits are **documentation examples only**, never real values.
+3. **Absolute personal paths.** Flag hardcoded absolute paths that identify the user's machine / account (e.g. `C:\Users\USER\...`, `.ssh`, `.venv`). In a user-level setup skill these are often intentional example paths — keep them only if they are clearly illustrative.
+4. **Git artifacts.** Ensure there is no `.git` directory inside the skill (a nested repo would leak history).
+
+If any check raises a concern — a real secret, an unexpected file, or a privacy leak — **do not proceed**. Report the finding(s) to the user with what was found and the risk, and wait for their explicit decision before continuing. Only proceed (or proceed with the user's chosen remediation) after they decide.
+
+## Step 4 — Overlay the local skill into the clone
 
 ```
 cp -r "<skill-dir>/." "<workdir>/"
@@ -64,7 +75,7 @@ cp -r "<skill-dir>/." "<workdir>/"
 
 Copy the directory *contents* (trailing `/.`) so repo-only files the local skill does not have are preserved, and the repo's `.git` is untouched.
 
-## Step 4 — Verify with git's built-in checks (no re-download)
+## Step 5 — Verify with git's built-in checks (no re-download)
 
 Do not re-download files for byte comparison. git already guarantees object integrity end to end (every blob is content-addressed by SHA-1; push transfers the same objects). Use:
 
@@ -79,7 +90,7 @@ git fsck --full
 - `git fsck --full` validates local object/database integrity (expect no errors).
 - Because the working files are the same source files and git hashes content, a clean `fsck` plus the expected diff set is sufficient verification. Skip the external curl-download + sha256 step.
 
-## Step 5 — Commit and push; confirm via the push result
+## Step 6 — Commit and push; confirm via the push result
 
 ```
 git add -A
@@ -91,7 +102,7 @@ git ls-remote origin
 - Treat the **push output itself** as confirmation: it must exit 0 and show the ref advancing (e.g. `a0ac6e9..b767b10 main -> main`).
 - Optionally `git ls-remote origin` and confirm `refs/heads/main` equals the commit just pushed. GitHub confirms the ref update on push, so this is authoritative — no extra local clone is required.
 
-## Step 6 — Self-update when the skill lacked an answer
+## Step 7 — Self-update when the skill lacked an answer
 
 If this run hits a problem that the skill (this file or `references/setup.md`) does **not** already cover:
 
@@ -107,6 +118,7 @@ If this run hits a problem that the skill (this file or `references/setup.md`) d
 - **Creating a repo is done on the GitHub website**, not with the SSH key: send the user to https://github.com/new with the exact name/owner/visibility, then confirm via `git ls-remote` and clone.
 - **README is checked before every push**, and only auto-generated after the user agrees.
 - **Verify via git (`status`/`diff`/`fsck`) and the push result**, not by re-downloading.
+- **Audit before every upload/update**: file inventory, secret patterns, absolute personal paths, no nested `.git`. Any concern → stop, report to the user, wait for a decision.
 - **Preserve repo-only files:** always `cp -r src/. dst/`, never `cp -r src dst`.
 - **`ssh-keygen` needs a Windows-native path** (`-f C:/Users/USER/.ssh/id_ed25519`); an msys `/c/...` path fails.
 - **`winget install Git.Git` requires `--scope user`** to avoid an admin/UAC prompt that hangs non-interactive shells.
@@ -115,6 +127,7 @@ If this run hits a problem that the skill (this file or `references/setup.md`) d
 
 - [ ] User explicitly named the local skill (path verified, `SKILL.md` name confirmed) and the exact `owner/repo`.
 - [ ] Target repo exists (cloned), or was created by the user on https://github.com/new and confirmed via `git ls-remote`, then cloned.
+- [ ] **Leak/privacy audit passed** (file inventory clean, no real secrets, absolute paths are only illustrative examples, no nested `.git`); any concern was reported to the user and resolved by their decision.
 - [ ] README.md exists and is current — or the user was asked and an AI-generated README was added on approval.
 - [ ] `git status`/`git diff` show only the expected changed files; `git fsck --full` reports no errors.
 - [ ] `git push` exits 0 and advances `main`; optionally `git ls-remote` confirms the remote hash.
