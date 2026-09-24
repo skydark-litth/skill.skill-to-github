@@ -1,8 +1,8 @@
 ---
 name: skill-to-github
-description: "Sync a WorkBuddy user-level skill directory to a GitHub repository using git over SSH. Use when the user asks to publish, update, back up, version-control, or reconcile a local skill with a GitHub repo. The user must explicitly name both the local skill and the GitHub project; if the repo does not exist, guide the user to create it on the GitHub website. Runs a leak/privacy audit before every upload and reports any concern to the user for a decision. Ensures README.md exists and is current — generating it when missing, or updating it from the old README plus the new skill's changes when the repo README's version is older than the skill's, always on user approval. Relies on git's built-in integrity checks rather than re-downloading files, and self-updates when it hits a problem it does not yet cover."
+description: "Sync a WorkBuddy user-level skill directory to a GitHub repository using git over SSH. Use when the user asks to publish, update, back up, version-control, or reconcile a local skill with a GitHub repo. The user must explicitly name both the local skill and the GitHub project; if the repo does not exist, guide the user to create it on the GitHub website. Runs a leak/privacy audit before every upload and reports any concern to the user for a decision. Ensures README.md exists and is current — generating it when missing, or updating it from the old README plus the new skill's changes when the repo README's version is older than the skill's, always on user approval. Relies on git's built-in integrity checks rather than re-downloading files, cleans up the local clone after a verified push, and self-updates when it hits a problem it does not yet cover."
 agent_created: true
-version: 2.2.0
+version: 2.3.0
 ---
 
 # skill-to-github
@@ -106,7 +106,23 @@ git ls-remote origin
 - Treat the **push output itself** as confirmation: it must exit 0 and show the ref advancing (e.g. `a0ac6e9..b767b10 main -> main`).
 - Optionally `git ls-remote origin` and confirm `refs/heads/main` equals the commit just pushed. GitHub confirms the ref update on push, so this is authoritative — no extra local clone is required.
 
-## Step 7 — Self-update when the skill lacked an answer
+## Step 7 — Clean up the local clone after a verified push
+
+After Step 6 confirms a successful push (`git push` exits 0 and the ref advances), the local clone working directory `<workdir>` has served its purpose. To save disk space, **remove it automatically — no need to ask the user**:
+
+```bash
+# Git Bash
+rm -rf "<workdir>"
+# PowerShell
+Remove-Item -Recurse -Force "<workdir>"
+```
+
+Rules:
+- Delete **only** the exact `<workdir>` created in Step 1. Never touch the original local skill directory (`<skill-dir>`) or any sibling/other path.
+- Delete **only after a verified successful push**. If the push failed or was aborted, **keep** `<workdir>` — it still holds unpushed changes and is the natural retry point.
+- In the final summary, state whether `<workdir>` was removed or retained (and why).
+
+## Step 8 — Self-update when the skill lacked an answer
 
 If this run hits a problem that the skill (this file or `references/setup.md`) does **not** already cover:
 
@@ -135,4 +151,5 @@ If this run hits a problem that the skill (this file or `references/setup.md`) d
 - [ ] README.md exists and is current: generated if missing (on user approval), or updated from the old README + new skill changes when the repo README's version is older than the skill's (on user approval).
 - [ ] `git status`/`git diff` show only the expected changed files; `git fsck --full` reports no errors.
 - [ ] `git push` exits 0 and advances `main`; optionally `git ls-remote` confirms the remote hash.
+- [ ] Local clone `<workdir>` was removed after a verified push (or retained with reason if push failed).
 - [ ] Any newly encountered, previously undocumented problem was solved and recorded into the skill (version bumped if behavior changed).
