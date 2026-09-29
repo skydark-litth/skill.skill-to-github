@@ -2,7 +2,7 @@
 name: skill-to-github
 description: "Sync a WorkBuddy user-level skill directory to a GitHub repository using git over SSH. Use when the user asks to publish, update, back up, version-control, or reconcile a local skill with a GitHub repo. The user must explicitly name both the local skill and the GitHub project; if the repo does not exist, guide the user to create it on the GitHub website. Runs a leak/privacy audit before every upload and reports any concern to the user for a decision. Ensures README.md exists and is current — generating it when missing, or updating it from the old README plus the new skill's changes when the repo README's version is older than the skill's, always on user approval. Relies on git's built-in integrity checks rather than re-downloading files, cleans up the local clone after a verified push, and self-updates when it hits a problem it does not yet cover."
 agent_created: true
-version: 2.3.0
+version: 2.5.1
 ---
 
 # skill-to-github
@@ -32,6 +32,12 @@ Probe whether the target already exists:
 
 ```
 git ls-remote git@github.com:<owner>/<repo>.git
+```
+
+Read that probe's **own** exit status, not a piped command's: `git ls-remote ... | head` reports `head`'s status, which is always 0, and an **existing-but-empty** repo also prints nothing and exits 0. So the only reliable signals are: **exit 0 + no output = exists but empty**; **non-zero + message = missing or no access**. When a probe comes back ambiguous, re-run it capturing the status directly:
+
+```
+out=$(git ls-remote git@github.com:<owner>/<repo>.git 2>&1); code=$?
 ```
 
 - **Exists** → clone it to a fresh working directory under the current workspace:
@@ -78,6 +84,8 @@ cp -r "<skill-dir>/." "<workdir>/"
 ```
 
 Copy the directory *contents* (trailing `/.`) so repo-only files the local skill does not have are preserved, and the repo's `.git` is untouched.
+
+> ⚠️ Exception: if the source directory **contains its own `.git`** (e.g. it is a clone of an upstream repo, or you are publishing an arbitrary project folder rather than a skill folder), **do NOT** use `cp -r src/. dst/` — that copies the source `.git` over the clone and corrupts/replaces the target repo's `.git`. Instead copy the intended files explicitly (excluding `.git`), or use `tar`/`rsync --exclude=.git`.
 
 ## Step 5 — Verify with git's built-in checks (no re-download)
 
@@ -135,11 +143,16 @@ If this run hits a problem that the skill (this file or `references/setup.md`) d
 
 - **Explicit targets first.** Never sync without the user naming the exact local skill and `owner/repo`; verify the local `SKILL.md` name before overlaying.
 - **`core.autocrlf=false` is mandatory.** Without it, Git for Windows rewrites line endings and corrupts Python scripts.
+  - To *measure* line endings, count bytes (`python -c` / `od -c`); **do not trust `grep -c $'\r'` in Git Bash** — the escape can degrade to an empty pattern, which matches every line and reports the line count instead of 0, producing a false "CRLF everywhere" alarm.
 - **Creating a repo is done on the GitHub website**, not with the SSH key: send the user to https://github.com/new with the exact name/owner/visibility, then confirm via `git ls-remote` and clone.
 - **README is checked before every push**: generate if missing; when the repo README's version is older than the local skill's, ask the user before letting the model update it based on the old README + the new skill's changes. Never auto-write without the user's decision.
 - **Verify via git (`status`/`diff`/`fsck`) and the push result**, not by re-downloading.
+- **A rendered / injected copy of this skill file may not match the disk.** When the skill is loaded, backticked sequences in the file can be command-substituted, so the injected copy can show shell error text (e.g. "command not found") where the file on disk actually holds the intended characters. Always read the file itself before editing — never "fix" text that only looks broken in the injected copy.
 - **Audit before every upload/update**: file inventory, secret patterns, absolute personal paths, no nested `.git`. Any concern → stop, report to the user, wait for a decision.
-- **Preserve repo-only files:** always `cp -r src/. dst/`, never `cp -r src dst`.
+- **Preserve repo-only files:** use `cp -r src/. dst/` (trailing `/.`), never `cp -r src dst` — **except** when the source has its own nested `.git`, in which case copy the intended files explicitly and exclude `.git` (a blanket copy would clobber the clone's `.git`).
+- **Non-skill project folders:** the flow also works for arbitrary local directories; Step 2's version comparison does not apply (project READMEs typically have no `version:`), and when the target repo is **public**, additionally flag license/redistribution risk if the project derives from upstream code that has no LICENSE.
+  - **License-risk mitigation (leave the choice to the user):** when the user still wants a public repo, offer excluding the upstream-derived files (a common carrier is an upstream-shipped `autounattend.xml`) — the project often re-fetches it at runtime, so the repo stays functional. Write that `.gitignore` into the **local source directory**, not only the clone, so Step 4's overlay carries it into the repo and it survives the next sync. Verify via `git status --short --ignored` that the excluded file shows as `!!` and is absent from `git diff --cached`.
+- **Empty target repo:** `git clone` warns "You appear to have cloned an empty repository" and yields no commits; the clone's HEAD already tracks `main`, so `git add -A` → `git commit` → `git push -u origin main` works directly (no need to pre-create the branch).
 - **`ssh-keygen` needs a Windows-native path** (`-f C:/Users/USER/.ssh/id_ed25519`); an msys `/c/...` path fails.
 - **`winget install Git.Git` requires `--scope user`** to avoid an admin/UAC prompt that hangs non-interactive shells.
 
