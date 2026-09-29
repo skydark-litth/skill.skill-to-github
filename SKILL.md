@@ -2,7 +2,7 @@
 name: skill-to-github
 description: "Sync a WorkBuddy user-level skill directory to a GitHub repository using git over SSH. Use when the user asks to publish, update, back up, version-control, or reconcile a local skill with a GitHub repo. The user must explicitly name both the local skill and the GitHub project; if the repo does not exist, guide the user to create it on the GitHub website. Runs a leak/privacy audit before every upload and reports any concern to the user for a decision. Ensures README.md exists and is current — generating it when missing, or updating it from the old README plus the new skill's changes when the repo README's version is older than the skill's, always on user approval. Relies on git's built-in integrity checks rather than re-downloading files, cleans up the local clone after a verified push, and self-updates when it hits a problem it does not yet cover."
 agent_created: true
-version: 2.5.1
+version: 2.5.2
 ---
 
 # skill-to-github
@@ -112,6 +112,7 @@ git ls-remote origin
 ```
 
 - Treat the **push output itself** as confirmation: it must exit 0 and show the ref advancing (e.g. `a0ac6e9..b767b10 main -> main`).
+- **A target that is already identical has nothing to push.** Check the changed set before committing (`diff -rq --exclude=.git <clone> <skill-dir>`, or Step 5's `git status`); if it is empty, report "already in sync" and skip `commit`/`push` — an empty `git commit` fails, and manufacturing an empty commit serves no purpose.
 - Optionally `git ls-remote origin` and confirm `refs/heads/main` equals the commit just pushed. GitHub confirms the ref update on push, so this is authoritative — no extra local clone is required.
 
 ## Step 7 — Clean up the local clone after a verified push

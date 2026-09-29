@@ -33,7 +33,7 @@
 | 泄密 / 隐私检查 | Step 3 | 文件清单、密钥模式、绝对路径、嵌套 `.git`；有疑即停并汇报 |
 | 覆盖内容 | Step 4 | `cp -r "<skill-dir>/." "<workdir>/"`（保留仓库独有文件）；源目录若自带 `.git`，改为显式复制并排除 `.git` |
 | git 内置验证 | Step 5 | `git status` / `git diff` / `git fsck --full` |
-| 提交推送 | Step 6 | `git add -A` → `commit` → `push`；以推送结果确认 |
+| 提交推送 | Step 6 | `git add -A` → `commit` → `push`；以推送结果确认；若无差异则报告「已同步」、不制造空提交 |
 | 自动清理克隆目录 | Step 7 | 推送验证成功后自动 `rm -rf <workdir>`，仅删克隆工作目录、不碰原始 skill；失败则保留 |
 | 自我更新 | Step 8 | 记录本次新遇到问题的解决办法 |
 
@@ -56,4 +56,4 @@ ssh -T git@github.com
 
 ## 版本
 
-- 当前版本：**v2.5.1**（详见 [`SKILL.md`](./SKILL.md) 顶部 `version` 字段）。
+- 当前版本：**v2.5.2**（详见 [`SKILL.md`](./SKILL.md) 顶部 `version` 字段）。
