@@ -2,7 +2,7 @@
 name: skill-to-github
 description: "Sync a WorkBuddy user-level skill directory to a GitHub repository using git over SSH. Use when the user asks to publish, update, back up, version-control, or reconcile a local skill with a GitHub repo. The user must explicitly name both the local skill and the GitHub project; if the repo does not exist, guide the user to create it on the GitHub website. Runs a leak/privacy audit before every upload and reports any concern to the user for a decision. Ensures README.md exists and is current — generating it when missing, or updating it from the old README plus the new skill's changes when the repo README's version is older than the skill's, always on user approval. Relies on git's built-in integrity checks rather than re-downloading files, cleans up the local clone after a verified push, and self-updates when it hits a problem it does not yet cover."
 agent_created: true
-version: 2.6.1
+version: 2.6.2
 ---
 
 # skill-to-github
@@ -166,6 +166,7 @@ If this run hits a problem that the skill (this file or `references/setup.md`) d
 - **`ssh-keygen` needs a Windows-native path** (`-f C:/Users/USER/.ssh/id_ed25519`); an msys `/c/...` path fails.
 - **`winget install Git.Git` requires `--scope user`** to avoid an admin/UAC prompt that hangs non-interactive shells.
 - **`git commit -m` with a non-ASCII / special-character message can be blocked by the shell tool's security policy** (it reports "Invoking PowerShell from Bash bypasses PowerShell security checks", even though the command is plain git). Symptom → cause → handling: the guard misfires on certain byte sequences in the argument. Write the message to a file and use `git commit -F <file>` instead, then delete the file. Same workaround applies whenever an inline `-m` string is rejected.
+  - **The `-F` message file must live OUTSIDE the repo working tree** (e.g. the system temp dir), or be removed **before** `git add -A`. Otherwise `git add -A` stages it and it gets committed and pushed as a stray file alongside the real changes. If it slips in, fix it promptly: `git rm --cached <file>` → `git commit` → `git push` (a file added and then deleted still leaves earlier commits holding it).
 - **Source files may have lost their BOM after the user edited them by hand** — a file that the repo convention requires to be UTF-8 with BOM can silently become BOM-less, which then propagates into the repo. Symptom → cause → handling: after the user says "I edited README/SKILL myself", check the first 3 bytes (`EF BB BF`) of every file about to be overlaid **before** `cp`; restore the BOM in the **local source file** (not just the clone) so the fix persists across future syncs.
 
 ## Verification Checklist
@@ -174,7 +175,7 @@ If this run hits a problem that the skill (this file or `references/setup.md`) d
 - [ ] Target repo exists (cloned), or was created by the user on https://github.com/new and confirmed via `git ls-remote`, then cloned.
 - [ ] **Leak/privacy audit passed** (file inventory clean, no real secrets, absolute paths are only illustrative examples, no nested `.git`); any concern was reported to the user and resolved by their decision.
 - [ ] README.md exists and is current: generated if missing (on user approval), or updated by content comparison against the current skill (on user approval).
-- [ ] `git status`/`git diff` show only the expected changed files; `git fsck --full` reports no errors.
+- [ ] `git status`/`git diff` show only the expected changed files; `git fsck --full` reports no errors; no stray helper files (e.g. a `-F` message file) were staged.
 - [ ] `git push` exits 0 and advances `main`; optionally `git ls-remote` confirms the remote hash.
 - [ ] Local clone `<workdir>` was removed after a verified push (or retained with reason if push failed).
 - [ ] Any newly encountered, previously undocumented problem was solved and recorded into the skill (version bumped if behavior changed).
