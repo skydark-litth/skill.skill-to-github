@@ -2,7 +2,7 @@
 name: skill-to-github
 description: "Sync a WorkBuddy user-level skill directory to a GitHub repository using git over SSH. Use when the user asks to publish, update, back up, version-control, or reconcile a local skill with a GitHub repo. The user must explicitly name both the local skill and the GitHub project; if the repo does not exist, guide the user to create it on the GitHub website. Runs a leak/privacy audit before every upload and reports any concern to the user for a decision. Ensures README.md exists and is current — generating it when missing, or updating it from the old README plus the new skill's changes when the repo README's version is older than the skill's, always on user approval. Relies on git's built-in integrity checks rather than re-downloading files, cleans up the local clone after a verified push, and self-updates when it hits a problem it does not yet cover."
 agent_created: true
-version: 2.5.2
+version: 2.6.0
 ---
 
 # skill-to-github
@@ -54,15 +54,16 @@ out=$(git ls-remote git@github.com:<owner>/<repo>.git 2>&1); code=$?
 
 ## Step 2 — Ensure README.md exists and is current
 
-Before each upload/update, check `README.md`. The repo's current README is available in the clone after Step 1; the local skill may or may not have one. Compare versions when the skill declares one.
+Before each upload/update, check `README.md`. The repo's current README is available in the clone after Step 1; the local skill may or may not have one.
+
+**Reconcile by content, not by a version number.** Do not rely on a `当前版本` / `Version:` line in the README as the staleness signal — READMEs are not required to carry one (some skills deliberately omit it), and a README can be stale with or without such a line.
 
 1. **Local skill has no `README.md`** → ask the user whether to auto-generate it.
-2. **Version comparison (when the skill has `version:` in `SKILL.md`)** → read the repo's README (from the clone) and the version it states (typically a `当前版本` / `Version:` line); compare with the local skill's `version:`:
-   - **Repo README version < local skill version** → ask the user: "远程 README 的版本（vX）比技能版本（vY）旧，是否调用大模型，按照旧版 README 与新版技能的变化来更新 README？"
-     - On approval: read the repo's **old README** and the local **new `SKILL.md`** (plus supporting files); have the model update the README by applying what changed between the two skill versions — keep the old README's structure and tone where still valid, refresh the version number, features, and workflow to match the new skill. Write the result into the **local skill directory** so it becomes part of the skill and is uploaded, then continue.
+2. **README present** → compare the README's described requirements / features / workflow / scripts against the current `SKILL.md` (and supporting files), and judge whether it still matches:
+   - **Mismatch or likely stale** → ask the user: "远程 README 与当前技能内容可能不一致（说明差异），是否调用大模型按「旧 README + 新技能的变化」更新 README？"
+     - On approval: read the repo's **old README** and the local **new `SKILL.md`** (plus supporting files); have the model update the README by applying what changed — keep the old README's structure and tone where still valid, refresh the features, workflow, and script list to match the new skill. Do **not** introduce or bump a version number unless the README already carries one and the user wants it kept. Write the result into the **local skill directory** so it becomes part of the skill and is uploaded, then continue.
      - If the user declines: keep the repo's old README as-is (do not overwrite it) and proceed.
-3. **Present but no version signal, or otherwise possibly stale** → spot-check that the described requirements and features match the current `SKILL.md`; when in doubt, treat it as not-current.
-4. If missing or not-current, **ask the user**: "README.md 缺失/可能已过期，是否调用大模型总结该技能的要求与功能，自动生成 / 更新？"
+3. If missing or not-current, **ask the user**: "README.md 缺失/可能已过期，是否调用大模型总结该技能的要求与功能，自动生成 / 更新？"
    - On approval, read the full `SKILL.md` (and supporting files) and have the model summarize the skill's purpose, requirements, features, workflow, and usage into a clear `README.md`. Write it into the **local skill directory** so it becomes part of the skill, then continue.
    - If the user declines, leave the README as-is and proceed.
 
@@ -74,6 +75,14 @@ Run a **leak / privacy audit** on the local skill before overlaying anything. Ch
 2. **Secret patterns.** Scan file contents for credential markers — `BEGIN (RSA|OPENSSH|EC|PRIVATE) KEY`, `ghp_`/`gho_` (GitHub tokens), cloud keys, `password=`/`api_key=`/`Bearer` — and confirm any hits are **documentation examples only**, never real values.
 3. **Absolute personal paths.** Flag hardcoded absolute paths that identify the user's machine / account (e.g. `C:\Users\USER\...`, `.ssh`, `.venv`). In a user-level setup skill these are often intentional example paths — keep them only if they are clearly illustrative.
 4. **Git artifacts.** Ensure there is no `.git` directory inside the skill (a nested repo would leak history).
+5. **Local-specific identifiers (desensitization / 脱敏).** This is a **hard gate** for anything that will be publicly visible. Scan for and replace any identifier that ties the content to *this* machine's real environment:
+   - **Real project / workspace names** (e.g. a specific client or product folder name) → replace with `<项目名>` / `<project>`.
+   - **Local drive roots and absolute paths** (e.g. `<某盘>/ClawWork`, `D:/...`) → replace with `<工作区根>` / `<workspace>`; the `D:`/`C:` drive letter itself counts if it points at a real folder.
+   - **Usernames and account names** (e.g. a GitHub handle, `C:\Users\USER`) → replace with `<用户名>` / `<user>`.
+   - **Hardcoded output examples** in README/SKILL (the "本机实测" samples) — these are the most common leak site; they must show placeholders, not real paths/names.
+   - **Push history is part of the surface.** If a previous push already contained such data, editing the file now is not enough — the old commit still holds it. Clear the history (delete and recreate the repo with the same name, or rewrite history) before treating the leak as resolved.
+
+   Run a full-directory rescan with a pattern set covering these classes (`<真实目录名>|<真实项目名>|<用户名>|<账号>|[A-Za-z]:[\\/]`) and confirm zero hits before proceeding; judge each hit as either a real leak or an intentional placeholder.
 
 If any check raises a concern — a real secret, an unexpected file, or a privacy leak — **do not proceed**. Report the finding(s) to the user with what was found and the risk, and wait for their explicit decision before continuing. Only proceed (or proceed with the user's chosen remediation) after they decide.
 
@@ -112,7 +121,7 @@ git ls-remote origin
 ```
 
 - Treat the **push output itself** as confirmation: it must exit 0 and show the ref advancing (e.g. `a0ac6e9..b767b10 main -> main`).
-- **A target that is already identical has nothing to push.** Check the changed set before committing (`diff -rq --exclude=.git <clone> <skill-dir>`, or Step 5's `git status`); if it is empty, report "already in sync" and skip `commit`/`push` — an empty `git commit` fails, and manufacturing an empty commit serves no purpose.
+- **A target that is already identical has nothing to push.** Reuse Step 5's `git status --short` — if the changed set is empty, report "already in sync" and skip `commit`/`push` — an empty `git commit` fails, and manufacturing an empty commit serves no purpose.
 - Optionally `git ls-remote origin` and confirm `refs/heads/main` equals the commit just pushed. GitHub confirms the ref update on push, so this is authoritative — no extra local clone is required.
 
 ## Step 7 — Clean up the local clone after a verified push
@@ -146,7 +155,7 @@ If this run hits a problem that the skill (this file or `references/setup.md`) d
 - **`core.autocrlf=false` is mandatory.** Without it, Git for Windows rewrites line endings and corrupts Python scripts.
   - To *measure* line endings, count bytes (`python -c` / `od -c`); **do not trust `grep -c $'\r'` in Git Bash** — the escape can degrade to an empty pattern, which matches every line and reports the line count instead of 0, producing a false "CRLF everywhere" alarm.
 - **Creating a repo is done on the GitHub website**, not with the SSH key: send the user to https://github.com/new with the exact name/owner/visibility, then confirm via `git ls-remote` and clone.
-- **README is checked before every push**: generate if missing; when the repo README's version is older than the local skill's, ask the user before letting the model update it based on the old README + the new skill's changes. Never auto-write without the user's decision.
+- **README is checked before every push** by **content**, not by version number: generate if missing; when the repo README no longer matches the current skill, ask the user before letting the model update it based on the old README + the new skill's changes. Never auto-write without the user's decision.
 - **Verify via git (`status`/`diff`/`fsck`) and the push result**, not by re-downloading.
 - **A rendered / injected copy of this skill file may not match the disk.** When the skill is loaded, backticked sequences in the file can be command-substituted, so the injected copy can show shell error text (e.g. "command not found") where the file on disk actually holds the intended characters. Always read the file itself before editing — never "fix" text that only looks broken in the injected copy.
 - **Audit before every upload/update**: file inventory, secret patterns, absolute personal paths, no nested `.git`. Any concern → stop, report to the user, wait for a decision.
@@ -162,7 +171,7 @@ If this run hits a problem that the skill (this file or `references/setup.md`) d
 - [ ] User explicitly named the local skill (path verified, `SKILL.md` name confirmed) and the exact `owner/repo`.
 - [ ] Target repo exists (cloned), or was created by the user on https://github.com/new and confirmed via `git ls-remote`, then cloned.
 - [ ] **Leak/privacy audit passed** (file inventory clean, no real secrets, absolute paths are only illustrative examples, no nested `.git`); any concern was reported to the user and resolved by their decision.
-- [ ] README.md exists and is current: generated if missing (on user approval), or updated from the old README + new skill changes when the repo README's version is older than the skill's (on user approval).
+- [ ] README.md exists and is current: generated if missing (on user approval), or updated by content comparison against the current skill (on user approval).
 - [ ] `git status`/`git diff` show only the expected changed files; `git fsck --full` reports no errors.
 - [ ] `git push` exits 0 and advances `main`; optionally `git ls-remote` confirms the remote hash.
 - [ ] Local clone `<workdir>` was removed after a verified push (or retained with reason if push failed).
