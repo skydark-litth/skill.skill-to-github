@@ -1,1 +1,0 @@
-Sync skill-to-github (mirror local): add git commit -F and BOM-check pitfalls, v2.6.1
